@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Flappy Harry on a Wand</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg-top: #5bb2ff;
+        --bg-bottom: #1b4f87;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100svh;
+        display: grid;
+        place-items: center;
+        font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+        background: radial-gradient(circle at 30% 10%, #7fc5ff, #154c81 70%);
+        color: #fff;
+        touch-action: manipulation;
+      }
+
+      .shell {
+        width: min(100vw, 480px);
+        height: min(100svh, 820px);
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        gap: 0.6rem;
+        padding: 0.75rem;
+      }
+
+      .hud {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: rgba(7, 18, 41, 0.45);
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        border-radius: 12px;
+        padding: 0.45rem 0.7rem;
+        backdrop-filter: blur(4px);
+      }
+
+      .hud strong {
+        color: #ffe066;
+      }
+
+      #game {
+        width: 100%;
+        height: 100%;
+        border-radius: 16px;
+        border: 2px solid rgba(255, 255, 255, 0.35);
+        background: linear-gradient(to bottom, var(--bg-top), var(--bg-bottom));
+        box-shadow: 0 16px 32px rgba(0, 0, 0, 0.4);
+      }
+
+      .help {
+        text-align: center;
+        font-size: 0.95rem;
+        opacity: 0.9;
+      }
+
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 0.45rem 0.85rem;
+        background: #ffe066;
+        color: #232323;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hud">
+        <span>Score: <strong id="score">0</strong></span>
+        <button id="restart" type="button">Restart</button>
+      </header>
+      <canvas id="game" width="390" height="680" aria-label="Flappy Harry game"></canvas>
+      <p class="help">Tap, click, or press Space to lift Harry. Avoid cursed towers!</p>
+    </main>
+
+    <script>
+      const canvas = document.getElementById("game");
+      const ctx = canvas.getContext("2d");
+      const scoreEl = document.getElementById("score");
+      const restartBtn = document.getElementById("restart");
+
+      const state = {
+        started: false,
+        gameOver: false,
+        score: 0,
+        best: Number(localStorage.getItem("flappyHarryBest") || 0),
+        gravity: 0.42,
+        jump: -7.4,
+        speed: 2.8,
+        bird: { x: 92, y: canvas.height * 0.45, vy: 0, size: 42, tilt: 0 },
+        pipes: [],
+      };
+
+      function reset() {
+        state.started = false;
+        state.gameOver = false;
+        state.score = 0;
+        state.bird.y = canvas.height * 0.45;
+        state.bird.vy = 0;
+        state.bird.tilt = 0;
+        state.pipes = [];
+        scoreEl.textContent = "0";
+      }
+
+      function spawnPipe() {
+        const gap = 170;
+        const margin = 90;
+        const topHeight = margin + Math.random() * (canvas.height - gap - margin * 2);
+        state.pipes.push({
+          x: canvas.width + 40,
+          width: 70,
+          top: topHeight,
+          bottom: topHeight + gap,
+          scored: false,
+        });
+      }
+
+      function flap() {
+        if (state.gameOver) return;
+        state.started = true;
+        state.bird.vy = state.jump;
+      }
+
+      function drawSky() {
+        const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        grad.addColorStop(0, "#87d4ff");
+        grad.addColorStop(1, "#1d5c9e");
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "rgba(255,255,255,.65)";
+        for (let i = 0; i < 5; i++) {
+          const x = ((Date.now() * 0.01 + i * 80) % (canvas.width + 120)) - 60;
+          const y = 50 + i * 80;
+          ctx.beginPath();
+          ctx.ellipse(x, y, 26, 14, 0, 0, Math.PI * 2);
+          ctx.ellipse(x + 20, y + 2, 20, 12, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      function drawPipe(pipe) {
+        ctx.fillStyle = "#2f9449";
+        ctx.strokeStyle = "#185f2c";
+        ctx.lineWidth = 3;
+
+        ctx.fillRect(pipe.x, 0, pipe.width, pipe.top);
+        ctx.strokeRect(pipe.x, 0, pipe.width, pipe.top);
+
+        ctx.fillRect(pipe.x - 6, pipe.top - 20, pipe.width + 12, 20);
+        ctx.strokeRect(pipe.x - 6, pipe.top - 20, pipe.width + 12, 20);
+
+        const bottomHeight = canvas.height - pipe.bottom;
+        ctx.fillRect(pipe.x, pipe.bottom, pipe.width, bottomHeight);
+        ctx.strokeRect(pipe.x, pipe.bottom, pipe.width, bottomHeight);
+
+        ctx.fillRect(pipe.x - 6, pipe.bottom, pipe.width + 12, 20);
+        ctx.strokeRect(pipe.x - 6, pipe.bottom, pipe.width + 12, 20);
+      }
+
+      function drawHarry() {
+        const { x, y, size, tilt } = state.bird;
+
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(tilt);
+
+        ctx.font = `${size}px serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("🧙", 0, -4);
+
+        ctx.strokeStyle = "#5b3a22";
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.moveTo(-22, 14);
+        ctx.lineTo(22, 16);
+        ctx.stroke();
+
+        ctx.fillStyle = "#f8d06b";
+        ctx.beginPath();
+        ctx.arc(24, 16, 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+      }
+
+      function drawTextOverlay() {
+        if (!state.started) {
+          ctx.fillStyle = "rgba(0,0,0,.35)";
+          ctx.fillRect(45, canvas.height * 0.32, canvas.width - 90, 110);
+          ctx.fillStyle = "#fff";
+          ctx.font = "bold 28px Trebuchet MS";
+          ctx.textAlign = "center";
+          ctx.fillText("Flappy Harry", canvas.width / 2, canvas.height * 0.38);
+          ctx.font = "18px Trebuchet MS";
+          ctx.fillText("Tap to Begin", canvas.width / 2, canvas.height * 0.43);
+        }
+
+        if (state.gameOver) {
+          ctx.fillStyle = "rgba(0,0,0,.5)";
+          ctx.fillRect(30, canvas.height * 0.32, canvas.width - 60, 160);
+          ctx.fillStyle = "#fff";
+          ctx.font = "bold 34px Trebuchet MS";
+          ctx.textAlign = "center";
+          ctx.fillText("Game Over", canvas.width / 2, canvas.height * 0.39);
+          ctx.font = "20px Trebuchet MS";
+          ctx.fillText(`Score: ${state.score}`, canvas.width / 2, canvas.height * 0.45);
+          ctx.fillText(`Best: ${state.best}`, canvas.width / 2, canvas.height * 0.49);
+        }
+      }
+
+      function collides(pipe) {
+        const r = state.bird.size * 0.34;
+        const left = state.bird.x - r;
+        const right = state.bird.x + r;
+        const top = state.bird.y - r;
+        const bottom = state.bird.y + r;
+
+        const insideX = right > pipe.x && left < pipe.x + pipe.width;
+        const hitsTop = top < pipe.top;
+        const hitsBottom = bottom > pipe.bottom;
+        return insideX && (hitsTop || hitsBottom);
+      }
+
+      function update() {
+        if (!state.started || state.gameOver) return;
+
+        state.bird.vy += state.gravity;
+        state.bird.y += state.bird.vy;
+        state.bird.tilt = Math.max(-0.45, Math.min(1.2, state.bird.vy / 9));
+
+        if (state.pipes.length === 0 || state.pipes[state.pipes.length - 1].x < canvas.width - 180) {
+          spawnPipe();
+        }
+
+        for (const pipe of state.pipes) {
+          pipe.x -= state.speed;
+          if (!pipe.scored && pipe.x + pipe.width < state.bird.x) {
+            pipe.scored = true;
+            state.score += 1;
+            scoreEl.textContent = String(state.score);
+          }
+
+          if (collides(pipe)) {
+            state.gameOver = true;
+          }
+        }
+
+        state.pipes = state.pipes.filter((p) => p.x + p.width > -30);
+
+        if (state.bird.y < 0 || state.bird.y > canvas.height) {
+          state.gameOver = true;
+        }
+
+        if (state.gameOver) {
+          state.best = Math.max(state.best, state.score);
+          localStorage.setItem("flappyHarryBest", String(state.best));
+        }
+      }
+
+      function draw() {
+        drawSky();
+        state.pipes.forEach(drawPipe);
+        drawHarry();
+        drawTextOverlay();
+      }
+
+      function loop() {
+        update();
+        draw();
+        requestAnimationFrame(loop);
+      }
+
+      canvas.addEventListener("pointerdown", flap);
+      window.addEventListener("keydown", (event) => {
+        if (event.code === "Space") {
+          event.preventDefault();
+          flap();
+        }
+      });
+      restartBtn.addEventListener("click", reset);
+
+      reset();
+      loop();
+    </script>
+  </body>
+</html>
